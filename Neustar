@@ -1,0 +1,28 @@
+library(jsonlite)
+library(lubridate)
+library(dplyr)
+
+#Performance Spend
+
+ower <- fromJSON("https://graph.facebook.com/v3.2/act_10155071198470936/insights?level=adset&day&fields=campaign_id%2Ccampaign_name%2Cadset_id%2Cadset_name%2Cspend&time_range=%7B%22since%22%3A%222018-11-04%22%2C%22until%22%3A%222018-12-09%22%7D&time_increment=1&limit=10000&access_token=EAAIZCoL2CuZBkBALCuZBQlZANWS9NGM4Km7IqJXPIDZBUuwgIM8z1yMZC6ja7cTuFIbTayxg8IcGeyowaZB6AXdHwPWvCgHSTOsSgm43PAosPPuhaLYF9FDlfoUp0GYs0coKP979gKCqiQBKEePZBdLFYtPwe3wV4JfJJ00d0LOdAZCwPrng6wA29VuDUBhIMPVoZD")$data
+ower$spend <- as.numeric(as.character(ower$spend))
+sum(ower$spend)
+
+#Brand Spend
+
+brand_m <- fromJSON("https://graph.facebook.com/v3.2/act_722894804461611/insights?level=adset&day&fields=campaign_id%2Ccampaign_name%2Cadset_id%2Cadset_name%2Cspend&time_range=%7B%22since%22%3A%222018-11-04%22%2C%22until%22%3A%222018-12-09%22%7D&time_increment=1&limit=10000&access_token=EAAIZCoL2CuZBkBALCuZBQlZANWS9NGM4Km7IqJXPIDZBUuwgIM8z1yMZC6ja7cTuFIbTayxg8IcGeyowaZB6AXdHwPWvCgHSTOsSgm43PAosPPuhaLYF9FDlfoUp0GYs0coKP979gKCqiQBKEePZBdLFYtPwe3wV4JfJJ00d0LOdAZCwPrng6wA29VuDUBhIMPVoZD")$data
+brand_m$spend <- as.numeric(as.character(brand_m$spend))
+sum(brand_m$spend)
+
+#Spain Spend
+
+Spain <- fromJSON("https://graph.facebook.com/v3.2/act_1162439393880872/insights?level=adset&day&fields=campaign_id%2Ccampaign_name%2Cadset_id%2Cadset_name%2Cspend&time_range=%7B%22since%22%3A%222018-11-04%22%2C%22until%22%3A%222018-12-09%22%7D&time_increment=1&limit=10000&access_token=EAAIZCoL2CuZBkBALCuZBQlZANWS9NGM4Km7IqJXPIDZBUuwgIM8z1yMZC6ja7cTuFIbTayxg8IcGeyowaZB6AXdHwPWvCgHSTOsSgm43PAosPPuhaLYF9FDlfoUp0GYs0coKP979gKCqiQBKEePZBdLFYtPwe3wV4JfJJ00d0LOdAZCwPrng6wA29VuDUBhIMPVoZD")$data
+Spain$spend <- as.numeric(as.character(Spain$spend))
+sum(Spain$spend)
+
+#row bind all data frames into 1
+
+total <- rbind(ower, brand_m, Spain)
+sum(total$spend)
+
+write.csv2(total, "neustar.csv", row.names = FALSE)
