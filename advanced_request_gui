@@ -1,0 +1,1 @@
+act_953120651880404/insights?fields=impressions,spend,cpc,cost_per_unique_action_type&breakdowns=impression_device&time_range={"since":"2021-07-01","until":"2021-07-10"}&time_increment=1&filtering=[{field: "action_type",operator:"IN", value: ['omni_purchase']}]
