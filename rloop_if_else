@@ -1,0 +1,117 @@
+library(dplyr)
+library(prophet)
+library(bigrquery)
+library(bigQueryR)
+library(googleAuthR)
+library(gsheet)
+
+options(googleAuthR.scopes.selected = c(
+  "https://www.googleapis.com/auth/bigquery",
+  "https://www.googleapis.com/auth/analytics")
+)
+
+library(RGoogleAnalytics)
+library(knitr)
+library(googleAnalyticsR)
+library(gtrendsR)
+library(kableExtra)
+library(DT)
+library(widgetframe)
+library(httr)
+library(stringr)
+library(jsonlite)
+library(lubridate)
+library(plotly)
+library(tidyr)
+
+
+
+source("fb_help.R")
+
+gar_auth_service("bq_conn.json")
+knitr::opts_chunk$set(echo = TRUE)
+
+###
+### ----- Filter Date
+###
+start_date <- "2020-08-01"
+end_date <- Sys.Date()
+
+###
+### ----  Query all brands and
+###
+
+# BigQuery Auth
+bq_conn <- get_bq_conn()
+bigrquery::dbListTables(bq_conn)
+
+###
+### CDS table
+####
+
+
+sql_query <- sprintf("SELECT * FROM `martech-central-group.fb_data.insights_daily` 
+where date_start between '%s' and '%s' 
+order by date_start asc", start_date, end_date)
+
+offence_qtr <- bq_project_query('martech-central-group', sql_query)
+df_all <- bq_table_download(offence_qtr)
+
+fb_data_df <- df_all %>% unnest(cost_per_unique_action_type)
+fb_data_df$value <- as.numeric(fb_data_df$value)
+fb_data_df$spend <- as.numeric(fb_data_df$spend)
+fb_data_df$impressions <- as.numeric(fb_data_df$impressions)
+fb_data_df$conversions <- fb_data_df$spend/fb_data_df$value
+fb_data_df$conversions <- as.numeric(fb_data_df$conversions)
+fb_data_df$date_start <- as.Date(fb_data_df$date_start)
+fb_data_df$cpa <- as.numeric(fb_data_df$value)
+
+
+fb_data_df <- fb_data_df %>% filter(date_start > "2021-08-01")
+
+
+# Groupping_Campaigns
+
+df.fb.i <- fb_data_df %>%
+  mutate(type = case_when(
+    grepl("FN:PSP", adset_name) ~ "psp",
+    grepl("FN:RTG", adset_name) ~ "rtg",
+    
+  ))
+
+
+df.fb.i.p <- df.fb.i %>% filter (action_type == "omni_purchase")
+
+#
+# Groupping_Campaigns
+#
+
+
+t <- df.fb.i.p %>% 
+group_by(date_start, type) %>%
+  summarize(impressions = sum(impressions), 
+            conversions = sum(conversions),
+            spend = sum(spend),
+            cpa = sum(spend)/sum(conversions))
+
+
+### Non classified campaigns lower inc
+
+t[is.na(t)] = "all"
+
+
+### Loop with inc coefs based on if or else conditions
+
+x=c()
+for(i in 1:nRowsDf){
+  if(t[i,2]=="psp"){
+    x[i]=t[i,4]*0.3
+  }
+  else if (t[i,2]=="rtg"){
+    x[i]=t[i,4]*0.1
+  }
+  else(t[i,2]=="all")
+    x[i]=t[i,4]*0.05
+  }
+
+t$icpa = x
