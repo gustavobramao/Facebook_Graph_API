@@ -1,0 +1,293 @@
+library(dplyr)
+library(prophet)
+library(bigrquery)
+library(bigQueryR)
+library(googleAuthR)
+library(gsheet)
+
+options(googleAuthR.scopes.selected = c(
+  "https://www.googleapis.com/auth/bigquery",
+  "https://www.googleapis.com/auth/analytics")
+)
+
+library(RGoogleAnalytics)
+library(knitr)
+library(googleAnalyticsR)
+library(gtrendsR)
+library(kableExtra)
+library(DT)
+library(widgetframe)
+library(httr)
+library(stringr)
+library(jsonlite)
+library(lubridate)
+library(plotly)
+library(tidyr)
+
+
+
+source("fb_help.R")
+
+gar_auth_service("bq_conn.json")
+knitr::opts_chunk$set(echo = TRUE)
+
+###
+### ----- Filter Date
+###
+start_date <- "2020-08-01"
+end_date <- Sys.Date()
+
+###
+### ----  Query all brands and
+###
+
+# BigQuery Auth
+bq_conn <- get_bq_conn()
+bigrquery::dbListTables(bq_conn)
+
+###
+### CDS table
+####
+
+
+sql_query <- sprintf("SELECT * FROM `martech-central-group.fb_data.insights_daily` 
+where date_start between '%s' and '%s' 
+order by date_start asc", start_date, end_date)
+
+offence_qtr <- bq_project_query('martech-central-group', sql_query)
+df_all <- bq_table_download(offence_qtr)
+
+fb_data_df <- df_all %>% unnest(cost_per_unique_action_type)
+fb_data_df$value <- as.numeric(fb_data_df$value)
+fb_data_df$spend <- as.numeric(fb_data_df$spend)
+fb_data_df$impressions <- as.numeric(fb_data_df$impressions)
+fb_data_df$conversions <- fb_data_df$spend/fb_data_df$value
+fb_data_df$conversions <- as.numeric(fb_data_df$conversions)
+fb_data_df$date_start <- as.Date(fb_data_df$date_start)
+fb_data_df$cpa <- as.numeric(fb_data_df$value)
+
+
+fb_data_df <- fb_data_df %>% filter(date_start > "2021-08-01")
+
+#
+# Regex to filter between PSP and RTG
+#
+
+df.fb.i <- fb_data_df %>%
+  mutate(type = case_when(
+    grepl("FN:PSP", adset_name) ~ "psp",
+    grepl("FN:RTG", adset_name) ~ "rtg",
+    
+  ))
+
+
+
+#
+# Regex to filter between new and returning
+#
+
+df.fb.i.n <- fb_data_df %>%
+  mutate(type = case_when(
+    grepl("CT:NC", adset_name) ~ "new",
+    grepl("CT:EC", adset_name) ~ "returning",
+    
+  ))
+
+
+#
+### Fitering only purchase
+#
+
+df.fb.i.p <- df.fb.i %>% filter (action_type == "omni_purchase")
+df.fb.i.n.p <- df.fb.i.n %>% filter (action_type == "omni_purchase")
+
+df.fb.i.p$cst <- df.fb.i.n.p$type
+
+
+#
+# Groupping_Campaigns and aggregating
+#
+
+
+t <- df.fb.i.p %>% 
+group_by(date_start, type, cst) %>%
+  summarize(impressions = sum(impressions), 
+            conversions = sum(conversions),
+            spend = sum(spend),
+            cpa = sum(spend)/sum(conversions),
+            revenue = sum(conversions)*3000,
+            cir = sum(spend)/sum(revenue)*100)
+
+
+### Non classified campaigns lower inc
+
+t[is.na(t)] = "all"
+
+
+### Loop with inc coefs based on if or else conditions
+
+nRowsDf <- nrow(t)
+x=c()
+for(i in 1:nRowsDf){
+  if(t[i,2]=="psp"){
+    x[i]=t[i,5]*0.3
+  }
+  else if (t[i,2]=="rtg"){
+    x[i]=t[i,5]*0.1
+  }
+  else{
+    x[i]=t[i,5]*0.15
+  }
+}
+
+##
+## Small Transformation
+##
+
+t$iconversions = x
+t$iconv <- as.numeric(t$iconversions)
+t$icpa <- t$spend/t$iconv
+t$irevenue <- t$iconv*3000
+t$icir <- t$spend/t$irevenue*100
+
+
+library(highcharter)
+
+t.psp <- t %>% filter(type=="psp")
+t.rtg <- t %>% filter(type=="rtg")
+t.all <- t %>% filter(type=="all")
+
+
+###
+### Plotly spends x iCPAs
+###
+
+
+plot_ly() %>%
+  add_lines(x = t.psp$date_start, y = t.psp$icpa, mode = "lines+marker", name = "iCPA_PSP") %>%
+  add_trace(x = t.rtg$date_start, y = t.rtg$icpa, mode = "lines+marker", name = "iCPA_RTG") %>%
+  add_trace(x = t.psp$date_start, y = t.psp$spend, mode = "lines+marker", yaxis = "y2", name = "Spend_PSP") %>%
+  add_trace(x = t.rtg$date_start, y = t.rtg$spend, mode = "lines+marker", yaxis = "y2", name = "Spend_RTG") %>%
+  layout(yaxis2 = list(overlaying = "y", side = "right", title = "spend")) %>%
+  layout(title = 'Incremental Returns', xaxis = list(title = 'iCPA'), 
+       yaxis = list(title = 'Date'), legend = list(title=list(text='<b> iCPA </b>')))
+
+
+
+##
+### Plotly spends x iCiRs
+###
+
+
+
+
+plot_ly() %>%
+  add_lines(x = t.psp$date_start, y = t.psp$cir, mode = "lines+marker", name = "cir_PSP") %>%
+  add_trace(x = t.rtg$date_start, y = t.rtg$cir, mode = "lines+marker", name = "cir_RTG") %>%
+  add_lines(x = t.psp$date_start, y = t.psp$icir, mode = "lines+marker", name = "icir_PSP") %>%
+  add_trace(x = t.rtg$date_start, y = t.rtg$icir, mode = "lines+marker", name = "icir_RTG") %>%
+  add_trace(x = t.psp$date_start, y = t.psp$spend, mode = "lines+marker", yaxis = "y2", name = "Spend_PSP") %>%
+  add_trace(x = t.rtg$date_start, y = t.rtg$spend, mode = "lines+marker", yaxis = "y2", name = "Spend_RTG") %>%
+  layout(yaxis2 = list(overlaying = "y", side = "right", title = "spend")) %>%
+  layout(title = 'Incremental Returns', xaxis = list(title = 'iCPA'), 
+         yaxis = list(title = 'Date'), legend = list(title=list(text='<b> iCPA </b>')))
+
+
+
+###
+### Plotly Spends New vs Existing
+###
+
+t.new <- t %>% filter(cst=="new")
+t.returning <- t %>% filter(cst=="returning")
+
+
+fig <- plot_ly(x = t.new$date_start, y = t.new$spend, type = 'bar', name = 'new_spends')
+fig <- fig %>% add_trace(t.returning$date_start, y = t.returning$spend, name = 'returning_spends')
+fig <- fig %>% layout(yaxis = list(title = 'Count'), barmode = 'stack')
+fig
+
+
+
+###
+### Plotly Spends Awerness vs Performance
+###
+
+t.new <- t %>% filter(cst=="new")
+t.returning <- t %>% filter(cst=="returning")
+t.all <- t %>% filter(cst=="all")
+fig <- plot_ly(t, labels = ~cst, values = ~spend, type = 'pie')
+fig <- fig %>% layout(title = 'Spend customers mix',
+                      xaxis = list(showgrid = FALSE, zeroline = FALSE, showticklabels = FALSE),
+                      yaxis = list(showgrid = FALSE, zeroline = FALSE, showticklabels = FALSE))
+
+fig
+
+
+
+
+###
+### Plotly Spends prospecting and retargeting
+###
+
+
+
+fig <- plot_ly(t, labels = ~type, values = ~spend, type = 'pie')
+fig <- fig %>% layout(title = 'Spend segment mix',
+                      xaxis = list(showgrid = FALSE, zeroline = FALSE, showticklabels = FALSE),
+                      yaxis = list(showgrid = FALSE, zeroline = FALSE, showticklabels = FALSE))
+
+fig
+
+
+
+#### 
+### Table with montly perf
+###
+
+
+final <- t %>% 
+  mutate(month = month(date_start)) %>%
+  group_by(month, cst, type) %>%
+  summarize(impressions = sum(impressions), 
+            conversions = sum(conversions),
+            spend = sum(spend),
+            cpa = sum(spend)/sum(conversions),
+            revenue = sum(conversions)*3000,
+            cir = sum(spend)/sum(revenue)*100,
+            iconv = sum(iconv),
+            icpa = sum(spend)/sum(iconv),
+            irevenue = sum(iconv)*3000,
+            icir = sum(spend)/sum(irevenue)*100)
+
+
+
+### 
+### Loop with inc coefs based on LTV:CAC
+####
+
+nRowsDf <- nrow(final)
+x=c()
+for(i in 1:nRowsDf){
+  if(final[i,2]=="new"){
+    x[i]=1100/final[i,11]
+  }
+  else if (final[i,2]=="returning"){
+    x[i]=-1100/final[i,11]
+  }
+  else{
+    x[i]=0
+  }
+}
+
+
+final$ltv.cac = x
+
+### Small Transformation
+pc2.ltv <- 1100
+final$pc2.ltv = pc2.ltv
+
+
+### pc3 ltv
+pc3.ltv <- final$pc2.ltv-final$icpa
+final$pc3.ltv = pc3.ltv
